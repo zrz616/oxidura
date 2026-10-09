@@ -15,11 +15,11 @@ Rust + 单个 PostgreSQL 的 Temporal 式工作流引擎（学习项目）。契
 
 ### Issue tracker
 
-Issues 与 spec 以 markdown 文件存在 `.scratch/<feature>/`（local markdown；长期看板是 Linear 团队 TOM，暂不接入，原因与接入条件见文件）。See `docs/agents/issue-tracker.md`.
+Issues 与 spec 存在 Linear：团队 **TOM**，本仓库的工作在 project **`oxidura`** 下。See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-五个 canonical triage 角色沿用默认字符串，落在每个 issue 文件顶部的 `Status:` 行。See `docs/agents/triage-labels.md`.
+五个 canonical triage 角色沿用默认字符串（已在 TOM 建好）；可交给 agent 的票打 `ready-for-agent`。See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

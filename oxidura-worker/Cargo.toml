@@ -1,0 +1,16 @@
+[package]
+name = "oxidura-worker"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "oxidura"
+path = "src/main.rs"
+
+[dependencies]
+oxidura-core = { path = "../oxidura-core" }
+oxidura-sdk = { path = "../oxidura-sdk" }
+
+[lints]
+workspace = true

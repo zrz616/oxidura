@@ -1,0 +1,12 @@
+[package]
+name = "oxidura-sdk-macros"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# proc-macro crate 不能同时导出运行时代码，所以它必须是独立的 crate（ADR-0004）。
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true

@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = [
+    "oxidura-core",
+    "oxidura-store-postgres",
+    "oxidura-sdk",
+    "oxidura-sdk-macros",
+    "oxidura-worker",
+    "examples",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+# core 的「不认识数据库 / 不认识 async runtime」靠 crate 边界强制，而不是靠自觉（ADR-0004）。
+# gate 的第 6 项直接在 oxidura-core/Cargo.toml 上检查这件事。
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+large_enum_variant = "warn"

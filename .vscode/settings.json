@@ -1,0 +1,13 @@
+{
+    "workbench.colorCustomizations": {
+        "statusBar.background": "#dea584",
+        "statusBar.foreground": "#000000",
+        "statusBar.noFolderBackground": "#00ccff",
+        "statusBarItem.remoteBackground": "#f989c3",
+        "tab.activeBorder": "#fbfbfb",
+        "titleBar.activeBackground": "#dea584",
+        "titleBar.activeForeground": "#000000",
+        "titleBar.inactiveBackground": "#dea584cc",
+        "titleBar.inactiveForeground": "#ffffff"
+    }
+}

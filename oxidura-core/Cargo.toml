@@ -1,0 +1,11 @@
+[package]
+name = "oxidura-core"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# 这里必须保持零依赖：core 不认识数据库、也不认识 async runtime（ADR-0003、ADR-0004）。
+# verify-m0.sh 会直接在本文件里搜这两个关键词，出现即 gate 失败。
+
+[lints]
+workspace = true

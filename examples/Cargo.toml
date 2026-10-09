@@ -1,0 +1,12 @@
+[package]
+name = "examples"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+oxidura-core = { path = "../oxidura-core" }
+oxidura-sdk = { path = "../oxidura-sdk" }
+
+[lints]
+workspace = true

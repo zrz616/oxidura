@@ -1,0 +1,11 @@
+[package]
+name = "oxidura-store-postgres"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+oxidura-core = { path = "../oxidura-core" }
+
+[lints]
+workspace = true

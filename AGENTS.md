@@ -10,3 +10,17 @@ Rust + 单个 PostgreSQL 的 Temporal 式工作流引擎（学习项目）。契
 - **要解释或改动某处与 Temporal 的差异**：改 `docs/DESIGN.md` §5 偏离表里的 D 编号，别处只引用编号。
 - **不确定某功能是否在范围内**：读 `docs/DESIGN.md` §2 的「永不做」清单。
 - **做完一个里程碑**：跑 gate → 更新对应 `docs/milestones/<篇>.md` → 打 tag。
+
+## Agent skills
+
+### Issue tracker
+
+Issues 与 spec 以 markdown 文件存在 `.scratch/<feature>/`（local markdown；长期看板是 Linear 团队 TOM，暂不接入，原因与接入条件见文件）。See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+五个 canonical triage 角色沿用默认字符串，落在每个 issue 文件顶部的 `Status:` 行。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context：词表在 `DESIGN.md` §1，决策在 `docs/adr/`，Temporal 对照在 `docs/concepts/`。See `docs/agents/domain.md`.

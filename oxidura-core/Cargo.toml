@@ -4,8 +4,17 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
-# 这里必须保持零依赖：core 不认识数据库、也不认识 async runtime（ADR-0003、ADR-0004）。
-# verify-m0.sh 会直接在本文件里搜这两个关键词，出现即 gate 失败。
+# core 不认识数据库、也不认识 async runtime（ADR-0003、ADR-0004）。
+# verify-m0.sh 直接在本文件里搜这两个关键词，出现即 gate 失败；其余依赖只服务
+# 「类型形状与序列化」（ADR-0006）。
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+chrono = "0.4"
+serde_json = "1"
 
 [lints]
 workspace = true

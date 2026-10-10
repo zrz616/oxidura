@@ -4,8 +4,13 @@
 
 ```rust
 fn apply_commands(history_len: i64, wft_completed_event_id: i64,
-                  now: DateTime<Utc>, cmds: &[Command]) -> Vec<Event>
+                  now: DateTime<Utc>, cmds: &[Command]) -> Vec<HistoryEvent>
 ```
+
+返回 `HistoryEvent`（envelope）而非裸 `Event`：`history_len` 是 `event_id` 的起点（产出事件从
+`history_len + 1` 起连续取号），`now` 是它们的 `event_time` —— 两者只有在返回 envelope 时才有意义
+（ADR-0006）。`scheduled_event_id` 型回指（命令作用在**既有**事件上）随 P4 的 cancel 命令引入；M1 的
+命令子集产出的都是「派生新事件」，只带 `workflow_task_completed_event_id` 回指。
 
 worker 完成一次重放后，在**一个事务**里：物化事件 + 分配 `event_id`（`next_event_id`）+ 回填 `workflow_task_completed_event_id` / `scheduled_event_id` 回指 + enqueue 后续任务。OCC 用一条语句完成 CAS：
 

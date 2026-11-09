@@ -13,16 +13,20 @@
 //! 数据库与 async runtime（`sqlx` / `tokio`），这条约束由 gate 检查。
 
 pub mod command;
+pub mod context;
 pub mod event;
 pub mod failure;
+pub mod replay;
 pub mod status;
 
 mod apply;
 
 pub use apply::apply_commands;
 pub use command::{Command, CommandType};
+pub use context::{WfError, WorkflowContext};
 pub use event::{Event, EventType, HistoryEvent, WorkflowTaskFailedCause};
 pub use failure::{Failure, TimeoutType};
+pub use replay::{ReplayOutcome, ReplayTaskError, replay};
 pub use status::WorkflowExecutionStatus;
 
 /// workflow 输入 / activity 输入 / 任意结果。

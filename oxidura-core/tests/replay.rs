@@ -341,3 +341,83 @@ fn poll_budget_exceeded() {
         "自唤醒的 future 必须被预算截断，而不是被误判成 Blocked"
     );
 }
+
+#[test]
+fn replay_emits_fail_workflow_execution_on_workflow_error() {
+    let t1 = now();
+    let t2 = t1 + Duration::seconds(30);
+    let mut history = vec![
+        wf_started(1, t1),
+        wft_scheduled(2, t1),
+        wft_started(3, t1, 2),
+    ];
+
+    let wft_completed_id = history.len() as i64 + 1;
+    history.push(event(
+        wft_completed_id,
+        t1,
+        Event::WorkflowTaskCompleted(Box::new(WorkflowTaskCompletedAttrs {
+            scheduled_event_id: 2,
+            started_event_id: 3,
+            identity: "worker".to_string(),
+        })),
+    ));
+    let command = Command::ScheduleActivityTask(Box::new(ScheduleActivityTaskAttrs {
+        activity_id: "0".to_string(),
+        activity_type: "charge".to_string(),
+        task_queue: "activities".to_string(),
+        input: json!("order-42"),
+        schedule_to_close_timeout: None,
+        schedule_to_start_timeout: None,
+        start_to_close_timeout: None,
+        heartbeat_timeout: None,
+    }));
+    history.extend(apply_commands(
+        history.len() as i64,
+        wft_completed_id,
+        t1,
+        &[command],
+    ));
+
+    // 外部世界：活动跑完了（不走 apply_commands）。
+    history.push(event(
+        6,
+        t1,
+        Event::ActivityTaskStarted(Box::new(ActivityTaskStartedAttrs {
+            scheduled_event_id: 5,
+            identity: "activity-worker".to_string(),
+            attempt: 1,
+            last_failure: None,
+        })),
+    ));
+    history.push(event(
+        7,
+        t2,
+        Event::ActivityTaskCompleted(Box::new(ActivityTaskCompletedAttrs {
+            result: json!("charged"),
+            scheduled_event_id: 5,
+            started_event_id: 6,
+            identity: "activity-worker".to_string(),
+        })),
+    ));
+
+    // 本轮新的 WFT 边界。
+    history.push(wft_scheduled(8, t2));
+    history.push(wft_started(9, t2, 8));
+
+    let outcome = replay(&history, 3, |ctx| async move {
+        let _result = ctx.execute_activity("charge", json!("ping")).await?;
+        Err(WfError {
+            message: "charge failed".to_string(),
+        })
+    })
+    .unwrap();
+
+    let ReplayOutcome::Completed(commands) = outcome else {
+        panic!("execution failure 是正常终态，应当 Completed，得到 {outcome:?}");
+    };
+    let Command::FailWorkflowExecution(failed) = &commands[0] else {
+        panic!("应当是 FailWorkflowExecution，得到 {:?}", commands[0]);
+    };
+    assert_eq!(failed.failure.message, "charge failed");
+}

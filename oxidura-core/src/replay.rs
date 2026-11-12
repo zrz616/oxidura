@@ -5,10 +5,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context as TaskContext, Poll, Wake, Waker};
 
-use crate::command::{Command, CompleteWorkflowExecutionAttrs};
+use crate::command::{Command, CompleteWorkflowExecutionAttrs, FailWorkflowExecutionAttrs};
 use crate::context::{WfError, WorkflowContext};
 use crate::event::HistoryEvent;
-use crate::{Payload, WorkflowTaskFailedCause};
+use crate::{Failure, Payload, WorkflowTaskFailedCause};
 
 /// 一轮重放的结果。
 #[derive(Debug, PartialEq)]
@@ -69,8 +69,14 @@ where
                     })),
                 ]));
             }
-            Poll::Ready(Err(_)) => {
-                todo!("M1-02：workflow 返回 Err → FailWorkflowExecution 命令")
+            Poll::Ready(Err(err)) => {
+                return Ok(ReplayOutcome::Completed(vec![
+                    Command::FailWorkflowExecution(Box::new(FailWorkflowExecutionAttrs {
+                        failure: Failure {
+                            message: err.message,
+                        },
+                    })),
+                ]));
             }
             Poll::Pending if !wake.0.load(Ordering::SeqCst) => {
                 return Ok(ReplayOutcome::Blocked(inspector.commands()));

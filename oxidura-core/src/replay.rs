@@ -63,6 +63,9 @@ where
 
         match fut.as_mut().poll(&mut task_cx) {
             Poll::Ready(Ok(result)) => {
+                if inspector.has_pending_commands() {
+                    return Err(ReplayTaskError::PendingCommandAtClose);
+                }
                 return Ok(ReplayOutcome::Completed(vec![
                     Command::CompleteWorkflowExecution(Box::new(CompleteWorkflowExecutionAttrs {
                         result,
@@ -70,6 +73,9 @@ where
                 ]));
             }
             Poll::Ready(Err(err)) => {
+                if inspector.has_pending_commands() {
+                    return Err(ReplayTaskError::PendingCommandAtClose);
+                }
                 return Ok(ReplayOutcome::Completed(vec![
                     Command::FailWorkflowExecution(Box::new(FailWorkflowExecutionAttrs {
                         failure: Failure {
@@ -79,7 +85,7 @@ where
                 ]));
             }
             Poll::Pending if !wake.0.load(Ordering::SeqCst) => {
-                return Ok(ReplayOutcome::Blocked(inspector.commands()));
+                return Ok(ReplayOutcome::Blocked(inspector.take_commands()));
             }
             Poll::Pending => {
                 // 被请求唤醒 → 继续；预算在循环头部检查。

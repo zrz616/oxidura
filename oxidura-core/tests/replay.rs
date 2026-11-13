@@ -1,6 +1,6 @@
 //! M1-02：`replay` 的同步驱动。
 
-use std::pin::Pin;
+use std::pin::{Pin, pin};
 use std::task::{Context, Poll};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
@@ -64,16 +64,21 @@ fn wft_started(event_id: i64, event_time: DateTime<Utc>, scheduled_event_id: i64
     )
 }
 
+fn minimal_fixture(started_id: i64, event_time: DateTime<Utc>) -> Vec<HistoryEvent> {
+    let scheduled_id = started_id + 1;
+    vec![
+        wf_started(started_id, event_time),
+        wft_scheduled(scheduled_id, event_time),
+        wft_started(scheduled_id + 1, event_time, scheduled_id),
+    ]
+}
+
 #[test]
 fn replay_completes_immediately() {
     let t1 = now();
 
     // replay 边界：直到并包含本轮的 WorkflowTaskStarted（ADR-0010）。
-    let history = vec![
-        wf_started(1, t1),
-        wft_scheduled(2, t1),
-        wft_started(3, t1, 2),
-    ];
+    let history = minimal_fixture(1, t1);
 
     let result = replay(&history, 100, |_ctx| async move {
         Ok::<Payload, WfError>(json!("hello"))
@@ -420,4 +425,44 @@ fn replay_emits_fail_workflow_execution_on_workflow_error() {
         panic!("应当是 FailWorkflowExecution，得到 {:?}", commands[0]);
     };
     assert_eq!(failed.failure.message, "charge failed");
+}
+
+/// Poll `fut` 一次，然后把它丢掉。
+///
+/// 模拟「future 第一次 poll 时登记了命令，随后被丢弃」（例如 `select!` 丢掉分支）。
+async fn poll_once_and_drop<F: Future>(fut: F) {
+    let mut fut = pin!(fut);
+    std::future::poll_fn(|cx| {
+        let _ = fut.as_mut().poll(cx);
+        Poll::Ready(())
+    })
+    .await;
+}
+
+#[test]
+fn pending_command_at_close() {
+    let t1 = now();
+
+    let history = minimal_fixture(1, t1);
+    let result = replay(&history, 3, |ctx| async move {
+        poll_once_and_drop(ctx.execute_activity("charge", json!("ping"))).await;
+        Ok::<Payload, WfError>(json!("ping"))
+    });
+
+    assert_eq!(result, Err(ReplayTaskError::PendingCommandAtClose));
+}
+
+#[test]
+fn pending_command_at_close_when_workflow_errors() {
+    let t1 = now();
+
+    let history = minimal_fixture(1, t1);
+    let result = replay(&history, 3, |ctx| async move {
+        poll_once_and_drop(ctx.execute_activity("charge", json!("ping"))).await;
+        Err(WfError {
+            message: "boom".to_string(),
+        })
+    });
+
+    assert_eq!(result, Err(ReplayTaskError::PendingCommandAtClose));
 }

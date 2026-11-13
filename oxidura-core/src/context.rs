@@ -80,9 +80,14 @@ impl WorkflowContext {
         }
     }
 
-    /// 本轮已登记的命令（`replay` 在 `Blocked` 时取走）。
-    pub(crate) fn commands(&self) -> Vec<Command> {
-        self.inner.borrow().commands.clone()
+    /// 本轮是否有未决命令 —— 直接读字段，不克隆缓冲。
+    pub(crate) fn has_pending_commands(&self) -> bool {
+        !self.inner.borrow().commands.is_empty()
+    }
+
+    /// 取走本轮命令（`Blocked` 时交出；交出后 ctx 不再被使用）。
+    pub(crate) fn take_commands(&self) -> Vec<Command> {
+        std::mem::take(&mut self.inner.borrow_mut().commands)
     }
 }
 

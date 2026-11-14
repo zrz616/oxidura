@@ -1,10 +1,12 @@
 //! `replay()`：同步 poll-to-quiescence 的骨架（ADR-0002、ADR-0003、M1-02）。
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context as TaskContext, Poll, Wake, Waker};
 
+use crate::WorkflowTaskFailedCause::WorkflowWorkerUnhandledFailure;
 use crate::command::{Command, CompleteWorkflowExecutionAttrs, FailWorkflowExecutionAttrs};
 use crate::context::{WfError, WorkflowContext};
 use crate::event::HistoryEvent;
@@ -61,34 +63,42 @@ where
         // 必须在 poll 前清零：否则一次唤醒会污染后续所有 poll 的判据。
         wake.0.store(false, Ordering::SeqCst);
 
-        match fut.as_mut().poll(&mut task_cx) {
-            Poll::Ready(Ok(result)) => {
-                if inspector.has_pending_commands() {
-                    return Err(ReplayTaskError::PendingCommandAtClose);
+        let polled = catch_unwind(AssertUnwindSafe(|| fut.as_mut().poll(&mut task_cx)));
+        match polled {
+            Ok(poll) => match poll {
+                Poll::Ready(Ok(result)) => {
+                    if inspector.has_pending_commands() {
+                        return Err(ReplayTaskError::PendingCommandAtClose);
+                    }
+                    return Ok(ReplayOutcome::Completed(vec![
+                        Command::CompleteWorkflowExecution(Box::new(
+                            CompleteWorkflowExecutionAttrs { result },
+                        )),
+                    ]));
                 }
-                return Ok(ReplayOutcome::Completed(vec![
-                    Command::CompleteWorkflowExecution(Box::new(CompleteWorkflowExecutionAttrs {
-                        result,
-                    })),
-                ]));
-            }
-            Poll::Ready(Err(err)) => {
-                if inspector.has_pending_commands() {
-                    return Err(ReplayTaskError::PendingCommandAtClose);
+                Poll::Ready(Err(err)) => {
+                    if inspector.has_pending_commands() {
+                        return Err(ReplayTaskError::PendingCommandAtClose);
+                    }
+                    return Ok(ReplayOutcome::Completed(vec![
+                        Command::FailWorkflowExecution(Box::new(FailWorkflowExecutionAttrs {
+                            failure: Failure {
+                                message: err.message,
+                            },
+                        })),
+                    ]));
                 }
-                return Ok(ReplayOutcome::Completed(vec![
-                    Command::FailWorkflowExecution(Box::new(FailWorkflowExecutionAttrs {
-                        failure: Failure {
-                            message: err.message,
-                        },
-                    })),
-                ]));
-            }
-            Poll::Pending if !wake.0.load(Ordering::SeqCst) => {
-                return Ok(ReplayOutcome::Blocked(inspector.take_commands()));
-            }
-            Poll::Pending => {
-                // 被请求唤醒 → 继续；预算在循环头部检查。
+                Poll::Pending if !wake.0.load(Ordering::SeqCst) => {
+                    return Ok(ReplayOutcome::Blocked(inspector.take_commands()));
+                }
+                Poll::Pending => {
+                    // 被请求唤醒 → 继续；预算在循环头部检查。
+                }
+            },
+            Err(_) => {
+                return Err(ReplayTaskError::WorkflowTaskFailed {
+                    cause: WorkflowWorkerUnhandledFailure,
+                });
             }
         }
     }

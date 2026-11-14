@@ -4,6 +4,7 @@ use std::pin::{Pin, pin};
 use std::task::{Context, Poll};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
+use oxidura_core::WorkflowTaskFailedCause::WorkflowWorkerUnhandledFailure;
 use oxidura_core::command::{Command, CompleteWorkflowExecutionAttrs, ScheduleActivityTaskAttrs};
 use oxidura_core::event::{
     ActivityTaskCompletedAttrs, ActivityTaskStartedAttrs, Event, HistoryEvent,
@@ -465,4 +466,22 @@ fn pending_command_at_close_when_workflow_errors() {
     });
 
     assert_eq!(result, Err(ReplayTaskError::PendingCommandAtClose));
+}
+
+#[test]
+fn workflow_panic_becomes_workflow_task_failure() {
+    let t1 = now();
+    let history = minimal_fixture(1, t1);
+    let result = replay(
+        &history,
+        3,
+        |_ctx| async move { panic!("boom inside workflow") },
+    );
+
+    assert_eq!(
+        result,
+        Err(ReplayTaskError::WorkflowTaskFailed {
+            cause: WorkflowWorkerUnhandledFailure
+        })
+    );
 }

@@ -1,9 +1,10 @@
 //! M1-02：`replay` 的同步驱动。
 
-use std::pin::Pin;
+use std::pin::{Pin, pin};
 use std::task::{Context, Poll};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
+use oxidura_core::WorkflowTaskFailedCause::WorkflowWorkerUnhandledFailure;
 use oxidura_core::command::{Command, CompleteWorkflowExecutionAttrs, ScheduleActivityTaskAttrs};
 use oxidura_core::event::{
     ActivityTaskCompletedAttrs, ActivityTaskStartedAttrs, Event, HistoryEvent,
@@ -64,16 +65,21 @@ fn wft_started(event_id: i64, event_time: DateTime<Utc>, scheduled_event_id: i64
     )
 }
 
+fn minimal_fixture(started_id: i64, event_time: DateTime<Utc>) -> Vec<HistoryEvent> {
+    let scheduled_id = started_id + 1;
+    vec![
+        wf_started(started_id, event_time),
+        wft_scheduled(scheduled_id, event_time),
+        wft_started(scheduled_id + 1, event_time, scheduled_id),
+    ]
+}
+
 #[test]
 fn replay_completes_immediately() {
     let t1 = now();
 
     // replay 边界：直到并包含本轮的 WorkflowTaskStarted（ADR-0010）。
-    let history = vec![
-        wf_started(1, t1),
-        wft_scheduled(2, t1),
-        wft_started(3, t1, 2),
-    ];
+    let history = minimal_fixture(1, t1);
 
     let result = replay(&history, 100, |_ctx| async move {
         Ok::<Payload, WfError>(json!("hello"))
@@ -339,5 +345,143 @@ fn poll_budget_exceeded() {
         result,
         Err(ReplayTaskError::PollBudgetExceeded { limit: 3 }),
         "自唤醒的 future 必须被预算截断，而不是被误判成 Blocked"
+    );
+}
+
+#[test]
+fn replay_emits_fail_workflow_execution_on_workflow_error() {
+    let t1 = now();
+    let t2 = t1 + Duration::seconds(30);
+    let mut history = vec![
+        wf_started(1, t1),
+        wft_scheduled(2, t1),
+        wft_started(3, t1, 2),
+    ];
+
+    let wft_completed_id = history.len() as i64 + 1;
+    history.push(event(
+        wft_completed_id,
+        t1,
+        Event::WorkflowTaskCompleted(Box::new(WorkflowTaskCompletedAttrs {
+            scheduled_event_id: 2,
+            started_event_id: 3,
+            identity: "worker".to_string(),
+        })),
+    ));
+    let command = Command::ScheduleActivityTask(Box::new(ScheduleActivityTaskAttrs {
+        activity_id: "0".to_string(),
+        activity_type: "charge".to_string(),
+        task_queue: "activities".to_string(),
+        input: json!("order-42"),
+        schedule_to_close_timeout: None,
+        schedule_to_start_timeout: None,
+        start_to_close_timeout: None,
+        heartbeat_timeout: None,
+    }));
+    history.extend(apply_commands(
+        history.len() as i64,
+        wft_completed_id,
+        t1,
+        &[command],
+    ));
+
+    // 外部世界：活动跑完了（不走 apply_commands）。
+    history.push(event(
+        6,
+        t1,
+        Event::ActivityTaskStarted(Box::new(ActivityTaskStartedAttrs {
+            scheduled_event_id: 5,
+            identity: "activity-worker".to_string(),
+            attempt: 1,
+            last_failure: None,
+        })),
+    ));
+    history.push(event(
+        7,
+        t2,
+        Event::ActivityTaskCompleted(Box::new(ActivityTaskCompletedAttrs {
+            result: json!("charged"),
+            scheduled_event_id: 5,
+            started_event_id: 6,
+            identity: "activity-worker".to_string(),
+        })),
+    ));
+
+    // 本轮新的 WFT 边界。
+    history.push(wft_scheduled(8, t2));
+    history.push(wft_started(9, t2, 8));
+
+    let outcome = replay(&history, 3, |ctx| async move {
+        let _result = ctx.execute_activity("charge", json!("ping")).await?;
+        Err(WfError {
+            message: "charge failed".to_string(),
+        })
+    })
+    .unwrap();
+
+    let ReplayOutcome::Completed(commands) = outcome else {
+        panic!("execution failure 是正常终态，应当 Completed，得到 {outcome:?}");
+    };
+    let Command::FailWorkflowExecution(failed) = &commands[0] else {
+        panic!("应当是 FailWorkflowExecution，得到 {:?}", commands[0]);
+    };
+    assert_eq!(failed.failure.message, "charge failed");
+}
+
+/// Poll `fut` 一次，然后把它丢掉。
+///
+/// 模拟「future 第一次 poll 时登记了命令，随后被丢弃」（例如 `select!` 丢掉分支）。
+async fn poll_once_and_drop<F: Future>(fut: F) {
+    let mut fut = pin!(fut);
+    std::future::poll_fn(|cx| {
+        let _ = fut.as_mut().poll(cx);
+        Poll::Ready(())
+    })
+    .await;
+}
+
+#[test]
+fn pending_command_at_close() {
+    let t1 = now();
+
+    let history = minimal_fixture(1, t1);
+    let result = replay(&history, 3, |ctx| async move {
+        poll_once_and_drop(ctx.execute_activity("charge", json!("ping"))).await;
+        Ok::<Payload, WfError>(json!("ping"))
+    });
+
+    assert_eq!(result, Err(ReplayTaskError::PendingCommandAtClose));
+}
+
+#[test]
+fn pending_command_at_close_when_workflow_errors() {
+    let t1 = now();
+
+    let history = minimal_fixture(1, t1);
+    let result = replay(&history, 3, |ctx| async move {
+        poll_once_and_drop(ctx.execute_activity("charge", json!("ping"))).await;
+        Err(WfError {
+            message: "boom".to_string(),
+        })
+    });
+
+    assert_eq!(result, Err(ReplayTaskError::PendingCommandAtClose));
+}
+
+#[test]
+fn workflow_panic_becomes_workflow_task_failure() {
+    let t1 = now();
+    let history = minimal_fixture(1, t1);
+    let result = replay(
+        &history,
+        3,
+        |_ctx| async move { panic!("boom inside workflow") },
+    );
+
+    assert_eq!(
+        result,
+        Err(ReplayTaskError::WorkflowTaskFailed {
+            cause: WorkflowWorkerUnhandledFailure
+        })
     );
 }
